@@ -40,8 +40,11 @@ namespace Dotmim.Sync
             if (this.InnerCollection.Any(c => string.Equals(c, item, SyncGlobalization.DataSourceStringComparison)))
                 throw new Exception($"Column name {columnNameNormalized} already exists in the table");
 
+            // Column was in the excluded list, so we remove it as we are adding it later
             if (this.ExcludedCollection.Any(c => string.Equals(c, item, SyncGlobalization.DataSourceStringComparison)))
-                throw new Exception($"Column name {columnNameNormalized} is in the exclusion collection");
+            {
+                this.ExcludedCollection.Remove(item);
+            }
 
             this.InnerCollection.Add(columnNameNormalized);
         }
@@ -67,10 +70,39 @@ namespace Dotmim.Sync
         /// <summary>
         /// Exclude a range of columns from the sync process setup.
         /// </summary>
+        public void Exclude(string item)
+        {
+            var parserColumnName = new ObjectParser(item);
+            var columnNameNormalized = parserColumnName.ObjectName;
+
+            if (this.ExcludedCollection.Any(c => string.Equals(c, item, SyncGlobalization.DataSourceStringComparison)))
+                throw new Exception($"Column name {columnNameNormalized} has already been excluded");
+
+            // Column was in the inner collection list, so we remove it as we are excluding it later
+            if (this.InnerCollection.Any(c => string.Equals(c, item, SyncGlobalization.DataSourceStringComparison)))
+            {
+                this.InnerCollection.Remove(item);
+            }
+
+            this.ExcludedCollection.Add(columnNameNormalized);
+        }
+
+        /// <summary>
+        /// Exclude a range of columns from the sync process setup.
+        /// </summary>
         public void ExcludeRange(params string[] columnsName)
         {
             foreach (var columnName in columnsName)
-                this.ExcludedCollection.Add(columnName);
+                this.Exclude(columnName);
+        }
+
+        /// <summary>
+        /// Exclude a range of columns from the sync process setup.
+        /// </summary>
+        public void ExcludeRange(IEnumerable<string> columnsName)
+        {
+            foreach (var columnName in columnsName)
+                this.Exclude(columnName);
         }
 
         /// <summary>

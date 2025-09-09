@@ -34,19 +34,7 @@ namespace Dotmim.Sync
         /// </summary>
         public void Add(string item)
         {
-            var parserColumnName = new ObjectParser(item);
-            var columnNameNormalized = parserColumnName.ObjectName;
-
-            if (this.InnerCollection.Any(c => string.Equals(c, item, SyncGlobalization.DataSourceStringComparison)))
-                throw new Exception($"Column name {columnNameNormalized} already exists in the table");
-
-            // Column was in the excluded list, so we remove it as we are adding it later
-            if (this.ExcludedCollection.Any(c => string.Equals(c, item, SyncGlobalization.DataSourceStringComparison)))
-            {
-                this.ExcludedCollection.Remove(item);
-            }
-
-            this.InnerCollection.Add(columnNameNormalized);
+            MergeCollections(this.InnerCollection, this.ExcludedCollection, item, "already exists in the table");
         }
 
         /// <summary>
@@ -72,19 +60,7 @@ namespace Dotmim.Sync
         /// </summary>
         public void Exclude(string item)
         {
-            var parserColumnName = new ObjectParser(item);
-            var columnNameNormalized = parserColumnName.ObjectName;
-
-            if (this.ExcludedCollection.Any(c => string.Equals(c, item, SyncGlobalization.DataSourceStringComparison)))
-                throw new Exception($"Column name {columnNameNormalized} has already been excluded");
-
-            // Column was in the inner collection list, so we remove it as we are excluding it later
-            if (this.InnerCollection.Any(c => string.Equals(c, item, SyncGlobalization.DataSourceStringComparison)))
-            {
-                this.InnerCollection.Remove(item);
-            }
-
-            this.ExcludedCollection.Add(columnNameNormalized);
+            MergeCollections(this.ExcludedCollection, this.InnerCollection, item, "has already been excluded");
         }
 
         /// <summary>
@@ -185,5 +161,22 @@ namespace Dotmim.Sync
         /// Returns an enumerator that iterates through the list of columns to be added to the sync.
         /// </summary>
         IEnumerator IEnumerable.GetEnumerator() => this.InnerCollection.GetEnumerator();
+
+        private void MergeCollections(ICollection<string> collectionToAddTo, ICollection<string> collectionToDeleteFrom, string item, string errorMessage)
+        {
+            var parserColumnName = new ObjectParser(item);
+            var columnNameNormalized = parserColumnName.ObjectName;
+
+            if (collectionToAddTo.Any(c => string.Equals(c, item, SyncGlobalization.DataSourceStringComparison)))
+                throw new Exception($"Column name {columnNameNormalized} {errorMessage}");
+
+            // Column was in the excluded list, so we remove it as we are adding it later
+            if (collectionToDeleteFrom.Any(c => string.Equals(c, item, SyncGlobalization.DataSourceStringComparison)))
+            {
+                collectionToDeleteFrom.Remove(item);
+            }
+
+            collectionToAddTo.Add(columnNameNormalized);
+        }
     }
 }

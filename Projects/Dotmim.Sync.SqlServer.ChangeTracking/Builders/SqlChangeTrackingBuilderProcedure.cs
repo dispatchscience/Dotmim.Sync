@@ -3,6 +3,7 @@ using Dotmim.Sync.DatabaseStringParsers;
 using Dotmim.Sync.SqlServer.Builders;
 using Dotmim.Sync.SqlServer.Manager;
 using Microsoft.Data.SqlClient;
+using System;
 using System.Data;
 using System.Data.Common;
 using System.Linq;
@@ -573,7 +574,6 @@ namespace Dotmim.Sync.SqlServer.ChangeTracking.Builders
                     stringBuilder.AppendLine("AND ");
             }
 
-            // ----------------------------------
             stringBuilder.AppendLine("\t([side].[sync_timestamp] > @sync_min_timestamp OR @sync_min_timestamp IS NULL)");
             stringBuilder.AppendLine(")");
             stringBuilder.AppendLine("UNION");
@@ -595,24 +595,23 @@ namespace Dotmim.Sync.SqlServer.ChangeTracking.Builders
             stringBuilder.AppendLine($"\t, [side].[sync_row_is_tombstone] as [sync_row_is_tombstone]");
             stringBuilder.AppendLine($"FROM {this.SqlObjectNames.TableQuotedFullName} [base]");
 
-            // ----------------------------------
-            // Make Left Join
-            // ----------------------------------
-            stringBuilder.Append($"RIGHT JOIN {this.SqlObjectNames.TrackingTableQuotedShortName} [side] ON ");
+            // --------------------------------------------------------------------
+            // Conditionally use JOIN or RIGHT JOIN
+            // --------------------------------------------------------------------
+            stringBuilder.AppendLine("INNER JOIN " +
+                $"{this.SqlObjectNames.TrackingTableQuotedShortName} [side] ON " +
+                string.Join(" AND ", this.TableDescription.GetPrimaryKeysColumns()
+                    .Select(pk => $"[base].[{pk.ColumnName}] = [side].[{pk.ColumnName}]")) +
+                " WHERE (@sync_min_timestamp IS NULL)");
 
-            empty = string.Empty;
-            foreach (var pkColumn in this.TableDescription.GetPrimaryKeysColumns())
-            {
-                var columnParser = new ObjectParser(pkColumn.ColumnName, SqlObjectNames.LeftQuote, SqlObjectNames.RightQuote);
-                stringBuilder.Append($"{empty}[base].{columnParser.QuotedShortName} = [side].{columnParser.QuotedShortName}");
-                empty = " AND ";
-            }
-
-            stringBuilder.AppendLine();
-            stringBuilder.AppendLine("WHERE ([side].[sync_timestamp] > @sync_min_timestamp AND [side].[sync_row_is_tombstone] = 1);");
+            stringBuilder.AppendLine("UNION ALL");
+            stringBuilder.AppendLine($"SELECT * FROM {this.SqlObjectNames.TableQuotedFullName} [base]");
+            stringBuilder.AppendLine($"RIGHT JOIN {this.SqlObjectNames.TrackingTableQuotedShortName} [side] ON " +
+                string.Join(" AND ", this.TableDescription.GetPrimaryKeysColumns()
+                    .Select(pk => $"[base].[{pk.ColumnName}] = [side].[{pk.ColumnName}]")) +
+                " WHERE (@sync_min_timestamp IS NOT NULL AND [side].[sync_timestamp] > @sync_min_timestamp AND [side].[sync_row_is_tombstone] = 1)");
 
             sqlCommand.CommandText = stringBuilder.ToString();
-
             return sqlCommand;
         }
 

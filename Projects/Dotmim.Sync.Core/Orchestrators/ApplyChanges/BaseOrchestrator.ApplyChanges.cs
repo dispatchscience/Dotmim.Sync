@@ -219,7 +219,6 @@ namespace Dotmim.Sync
 
             // Get command
             DbCommand command = null;
-            var isBatch = false;
 
             var bpiTables = message.Changes.GetBatchPartsInfos(schemaTable);
 
@@ -295,8 +294,10 @@ namespace Dotmim.Sync
                             }
                         }
 
-                        (command, isBatch) = await this.InternalGetCommandAsync(scopeInfo, context, syncAdapter, dbCommandType,
+                        var (newCommand, isBatch) = await this.InternalGetCommandAsync(scopeInfo, context, syncAdapter, dbCommandType,
                                     runner.Connection, runner.Transaction, runner.Progress, runner.CancellationToken).ConfigureAwait(false);
+
+                        ReplaceCommand(ref command, newCommand);
 
                         if (command == null)
                             return (0, default, default, 0);
@@ -309,7 +310,7 @@ namespace Dotmim.Sync
 
                         if (isBatch)
                         {
-                            foreach (var syncRow in localSerializer.GetRowsFromFile(fullPath, schemaChangesTable))
+                            await foreach (var syncRow in localSerializer.GetRowsFromFileAsync(fullPath, schemaChangesTable).ConfigureAwait(false))
                             {
                                 rowsFetched++;
 
@@ -367,8 +368,10 @@ namespace Dotmim.Sync
                                     await this.InterceptAsync(fallbackArgs, runner.Progress, runner.CancellationToken).ConfigureAwait(false);
 
                                     syncAdapter.UseBulkOperations = false;
-                                    (command, isBatch) = await this.InternalGetCommandAsync(scopeInfo, context, syncAdapter, dbCommandType,
+                                    var (newCommand2, isBatch2) = await this.InternalGetCommandAsync(scopeInfo, context, syncAdapter, dbCommandType,
                                                     runner.Connection, runner.Transaction, runner.Progress, runner.CancellationToken).ConfigureAwait(false);
+                                    ReplaceCommand(ref command, newCommand2);
+                                    isBatch = isBatch2;
 
                                     var cmdText = command.CommandText;
 
@@ -417,7 +420,7 @@ namespace Dotmim.Sync
                             command.Connection = runner.Connection;
                             command.Transaction = runner.Transaction;
 
-                            foreach (var syncRow in localSerializer.GetRowsFromFile(fullPath, schemaChangesTable))
+                            await foreach (var syncRow in localSerializer.GetRowsFromFileAsync(fullPath, schemaChangesTable).ConfigureAwait(false))
                             {
                                 if (syncRow.RowState is SyncRowState.ApplyModifiedFailed or SyncRowState.ApplyDeletedFailed)
                                 {
@@ -883,6 +886,15 @@ namespace Dotmim.Sync
                 {
                     await localSerializerReader.DisposeAsync().ConfigureAwait(false);
                 }
+            }
+        }
+
+        private static void ReplaceCommand(ref DbCommand current, DbCommand next)
+        {
+            if (!object.ReferenceEquals(current, next))
+            {
+                current?.Dispose();
+                current = next;
             }
         }
     }

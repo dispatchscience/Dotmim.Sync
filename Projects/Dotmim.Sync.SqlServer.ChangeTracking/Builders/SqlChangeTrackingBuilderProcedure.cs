@@ -533,7 +533,6 @@ namespace Dotmim.Sync.SqlServer.ChangeTracking.Builders
             // needs to be transferred. It bypasses change tracking entirely for
             // maximum performance, doing a simple SELECT from the base table.
             // ====================================================================
-
             sb.AppendLine("IF @sync_min_timestamp IS NULL");
             sb.AppendLine("BEGIN");
 
@@ -609,7 +608,6 @@ namespace Dotmim.Sync.SqlServer.ChangeTracking.Builders
 
             // Filter change tracking results
             var ctWhere = new StringBuilder("\tWHERE ");
-            var hasFilter = false;
 
             // Apply filters to change tracking if all filter parameters are primary keys
             // This optimization pushes filtering into the change tracking query
@@ -620,7 +618,6 @@ namespace Dotmim.Sync.SqlServer.ChangeTracking.Builders
                 ctWhere.Append(filterWhere);
                 ctWhere.AppendLine();
                 ctWhere.Append("\t\tAND ");
-                hasFilter = true;
             }
 
             // Only get changes after the last sync timestamp
@@ -637,7 +634,6 @@ namespace Dotmim.Sync.SqlServer.ChangeTracking.Builders
             // - Live rows: JOIN succeeds, get full data from [base]
             // - Tombstones: JOIN fails (row deleted), but we still have PKs from [side]
             // ====================================================================
-
             sb.AppendLine(filter != null ? "SELECT DISTINCT" : "SELECT");
 
             // Build column list with COALESCE on primary keys to handle tombstones
@@ -683,8 +679,6 @@ namespace Dotmim.Sync.SqlServer.ChangeTracking.Builders
             return sqlCommand;
         }
 
-       
-       
         /// <inheritdoc/>
         protected override SqlCommand BuildSelectIncrementalChangesCommand(SyncFilter filter)
         {
@@ -729,6 +723,7 @@ namespace Dotmim.Sync.SqlServer.ChangeTracking.Builders
                 {
                     createFilterWhereSide = createFilterWhereSide.Replace("[base]", "[CT]", StringComparison.CurrentCultureIgnoreCase);
                 }
+
                 stringBuilder.Append($" WHERE {createFilterWhereSide}");
             }
 

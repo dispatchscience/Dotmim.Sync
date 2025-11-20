@@ -2,6 +2,7 @@ using Dotmim.Sync.Enumerations;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.IO.Compression;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -18,6 +19,7 @@ namespace Dotmim.Sync.Serialization
         private readonly SemaphoreSlim writerLock = new(1, 1);
         private StreamWriter sw;
         private Utf8JsonWriter writer;
+        private FileStream fileStream;
         private Func<SyncTable, object[], Task<string>> writingRowAsync;
         private Func<SyncTable, string, Task<object[]>> readingRowAsync;
         private int isOpen;
@@ -235,6 +237,10 @@ namespace Dotmim.Sync.Serialization
             {
                 this.sw = new StreamWriter(path, append);
                 this.writer = new Utf8JsonWriter(this.sw.BaseStream);
+                //this.fileStream = new FileStream(path, append ? FileMode.Append : FileMode.Create, FileAccess.Write, FileShare.None);
+                //var gzipStream = new System.IO.Compression.GZipStream(fileStream, CompressionLevel.Fastest);
+                //this.sw = new StreamWriter(gzipStream);
+                //this.writer = new Utf8JsonWriter(gzipStream);
 
                 this.writer.WriteStartObject();
                 this.writer.WritePropertyName("t");
@@ -338,6 +344,10 @@ namespace Dotmim.Sync.Serialization
                 {
                     position = this.sw.BaseStream.Position / 1024L;
                 }
+                //if (this.fileStream != null)
+                //    return this.fileStream.Position / 1024L;
+
+                //return 0;
             }
             finally
             {
@@ -357,6 +367,9 @@ namespace Dotmim.Sync.Serialization
 
             using var stream = File.OpenRead(path);
             using var jsonReader = new JsonReader(stream);
+            //using var fileStream = File.OpenRead(path);
+            //using var gzipStream = new System.IO.Compression.GZipStream(fileStream, CompressionMode.Decompress);
+            //using var jsonReader = new JsonReader(gzipStream);
 
             var state = SyncRowState.None;
 
@@ -500,6 +513,130 @@ namespace Dotmim.Sync.Serialization
                         break;
                 }
             }
+        }
+
+        public async IAsyncEnumerable<SyncRow> GetRowsFromFileAsync(string path, SyncTable schemaTable)
+        {
+            if (!File.Exists(path))
+                yield break;
+
+            using var stream = File.OpenRead(path);
+            using var jsonReader = new JsonReader(stream);
+            //using var fileStream = File.OpenRead(path);
+            //using var gzipStream = new System.IO.Compression.GZipStream(fileStream, CompressionMode.Decompress);
+            //using var jsonReader = new JsonReader(gzipStream);
+
+            var state = SyncRowState.None;
+
+            string tableName = null, schemaName = null;
+
+            while (jsonReader.Read())
+            {
+                if (jsonReader.TokenType != JsonTokenType.PropertyName)
+                    continue;
+
+                var propertyValue = jsonReader.GetString();
+
+                switch (propertyValue)
+                {
+                    case "n":
+                        tableName = jsonReader.ReadAsString();
+                        break;
+
+                    case "s":
+                        schemaName = jsonReader.ReadAsString();
+                        break;
+
+                    case "st":
+                        state = (SyncRowState)jsonReader.ReadAsInt16();
+                        break;
+
+                    case "c":
+                        var tmp = GetSchemaTableFromReader(
+                            jsonReader,
+                            schemaTable?.TableName ?? tableName,
+                            schemaTable?.SchemaName ?? schemaName);
+
+                        if (tmp != null)
+                            schemaTable = tmp;
+
+                        continue;
+
+                    case "r":
+                        var schemaEmpty = schemaTable == null;
+
+                        if (schemaEmpty)
+                            schemaTable = new SyncTable(tableName, schemaName);
+
+                        var hasToken = jsonReader.Read();
+                        if (!hasToken)
+                            break;
+
+                        var depth = jsonReader.Depth;
+
+                        while (jsonReader.Read() && jsonReader.Depth > depth)
+                        {
+                            var values = await ParseRowAsync(jsonReader, schemaTable).ConfigureAwait(false);
+                            yield return new SyncRow(schemaTable, values);
+                        }
+
+                        yield break;
+                }
+            }
+        }
+
+        private async Task<object[]> ParseRowAsync(JsonReader jsonReader, SyncTable schemaTable)
+        {
+            var index = 0;
+            var values = new object[schemaTable.Columns.Count + 1];
+            var sb = new StringBuilder();
+            bool useInterceptor = this.readingRowAsync != null;
+
+            while (jsonReader.Read() &&
+                   jsonReader.TokenType != JsonTokenType.EndArray)
+            {
+                if (useInterceptor)
+                {
+                    if (index > 0)
+                        sb.Append(',');
+                    sb.Append(jsonReader.GetString());
+                }
+                else
+                {
+                    object value = jsonReader.TokenType switch
+                    {
+                        JsonTokenType.Null => null,
+                        JsonTokenType.String when jsonReader.TryGetDateTimeOffset(out var dto) => dto,
+                        JsonTokenType.String => jsonReader.GetString(),
+                        JsonTokenType.True => true,
+                        JsonTokenType.False => false,
+                        JsonTokenType.Number when jsonReader.TryGetInt64(out var l) => l,
+                        JsonTokenType.Number => jsonReader.GetDouble(),
+                        _ => null
+                    };
+
+                    if (index >= 1 && value != null)
+                    {
+                        var columnType = schemaTable.Columns[index - 1].GetDataType();
+                        try
+                        {
+                            value = SyncTypeConverter.TryConvertTo(value, columnType);
+                        }
+                        catch
+                        {
+                        }
+                    }
+
+                    values[index] = value;
+                }
+
+                index++;
+            }
+
+            if (useInterceptor)
+                values = await this.readingRowAsync(schemaTable, sb.ToString()).ConfigureAwait(false);
+
+            return values;
         }
 
         /// <summary>
